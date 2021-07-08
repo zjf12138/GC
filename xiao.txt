@@ -1,0 +1,102 @@
+#include <DFRobot_LIS2DW12.h>
+#include <DFRobot_PLAY.h>
+#include <SoftwareSerial.h>
+#include <Arduino.h>
+#include <DFRobotDFPlayerMini.h>
+#include <avr/wdt.h>
+
+DFRobot_LIS2DW12_I2C acce1(&Wire,0x19);
+DFRobot_LIS2DW12_I2C acce2(&Wire,0x18); 
+DFRobotDFPlayerMini myDFPlayer;
+
+#define ALLNUMBER 9
+#define RESET_TIMEOUT 60000
+
+uint8_t scaleNumber=1;
+long long musicStamp;
+long long closeStamp;
+long long resetStamp;
+uint8_t playing=0;//定义关闭标记
+
+void sensor_init(DFRobot_LIS2DW12_I2C *acce1)
+{
+   while(!acce1->begin()){
+     Serial.println("Communication failed, check the connection and I2C address setting when using I2C communication.");
+     delay(1000);
+  }
+  acce1->softReset();//芯片软复位
+  acce1->setRange(DFRobot_LIS2DW12::e2_g);//设置传感器测量范围
+ 
+  acce1->setPowerMode(DFRobot_LIS2DW12::eContLowPwrLowNoise1_12bit);//设置模式连续测量，低功耗模式1(12位分辨率，低噪声启用）
+  acce1->setDataRate(DFRobot_LIS2DW12::eRate_800hz);//设置传感器数据采集速率
+  
+  //启用X,Y,Z方向的轻拍检测
+  acce1->enableTapDetectionOnZ(true);
+  acce1->enableTapDetectionOnY(true);
+  acce1->enableTapDetectionOnX(true);
+
+  //X,Y,Z方向阈值设置。阈值(mg)，只能在±2g范围使用
+  acce1->setTapThresholdOnX(/*Threshold = */0.5);
+  acce1->setTapThresholdOnY(/*Threshold = */0.5);
+  acce1->setTapThresholdOnZ(/*Threshold = */0.5);
+  
+  acce1->setTapDur(/*dur=*/6);//设置检测双击时，两次点击的间隔时间
+  acce1->setTapMode(DFRobot_LIS2DW12::eBothSingleDouble);
+  acce1->setInt1Event(DFRobot_LIS2DW12::eDoubleTap);
+}
+
+void setup(void){
+  wdt_enable(WDTO_2S);
+  Serial2.begin(9600);
+  Serial.begin(115200);//设置波特率为115200
+  Serial.println(F("DFRobot DFPlayer Mini Demo"));
+  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+
+  if (!myDFPlayer.begin(Serial2)) {  
+    Serial.println(F("Unable to begin:"));
+    Serial.println(F("1.Please recheck the connection!"));
+    Serial.println(F("2.Please insert the SD card!"));
+    while(true);
+  }
+  Serial.println(F("DFPlayer Mini online."));
+  resetStamp=millis();
+  sensor_init(&acce1);
+  sensor_init(&acce2);
+  wdt_reset();
+  delay(1000);
+  myDFPlayer.volume(20);  //Set volume value. From 0 to 30
+
+}
+
+void loop(void){
+  DFRobot_LIS2DW12:: eTap_t tapEvent = acce1.tapDetect();
+  DFRobot_LIS2DW12:: eTap_t tapEvent1 = acce2.tapDetect();
+  if((tapEvent  == DFRobot_LIS2DW12::eSTap)
+  ||(tapEvent  == DFRobot_LIS2DW12::eDTap)
+  ||(tapEvent1  == DFRobot_LIS2DW12::eSTap)
+  ||(tapEvent1  == DFRobot_LIS2DW12::eDTap))
+  {
+      Serial.print("点击了");
+      Serial.print("现在的数字是：");
+      Serial.println(scaleNumber);
+      delay(300);
+      resetStamp=millis();
+      musicStamp=millis();
+      myDFPlayer.play(scaleNumber);  
+      playing=1;
+      scaleNumber++;
+    }
+  //当次数达到上限后，重置音阶数为1 #9变成宏
+  if((scaleNumber == ALLNUMBER)
+     ||((playing==1) && (millis()-musicStamp>=6000)))
+    {
+      Serial.println("已重置音阶数字");
+      scaleNumber=1;
+      playing=0;
+    }
+    wdt_reset();
+    if(millis()-resetStamp >= RESET_TIMEOUT){
+      wdt_enable(WDTO_15MS);
+      while(1);
+    }
+}
